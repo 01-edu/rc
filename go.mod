@@ -1,4 +1,4 @@
-module rc
+module github.com/01-edu/rc
 
 go 1.16
 

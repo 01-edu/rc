@@ -1,9 +1,14 @@
 module github.com/01-edu/rc
 
-go 1.16
+go 1.18
 
 require (
-	github.com/01-edu/z01 v0.1.0
-	github.com/mattn/go-runewidth v0.0.12 // indirect
 	github.com/tatsushid/go-prettytable v0.0.0-20141013043238-ed2d14c29939
+	golang.org/x/exp v0.0.0-20230725093048-515e97ebf090
+	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	github.com/mattn/go-runewidth v0.0.15 // indirect
+	github.com/rivo/uniseg v0.2.0 // indirect
 )

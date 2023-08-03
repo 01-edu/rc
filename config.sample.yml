@@ -1,0 +1,9 @@
+---
+no-slices: false
+no-these-slices: [int]
+no-for: false
+allow-builtins: false 
+allow-cast: false
+allowed-functions:
+  - fmt.*
+no-relative-imports: true

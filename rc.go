@@ -9,68 +9,32 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
 	table "github.com/tatsushid/go-prettytable"
+	"golang.org/x/exp/slices"
+	"gopkg.in/yaml.v3"
 )
 
-type strBoolMap map[string]bool
-
-// Implementation of the flag.Value interface
-func (a *strBoolMap) String() (res string) {
-	for k, _ := range *a {
-		res += k
-	}
-	return res
-}
-
-// Implementation of the flag.Value interface
-func (a *strBoolMap) Set(str string) error {
-	if *a == nil {
-		*a = make(map[string]bool)
-	}
-	s := strings.Split(str, ",")
-	for _, v := range s {
-		(*a)[v] = true
-	}
-	return nil
-}
-
-// Flag that groups a boolean value and a regular expression
-type regexpFlag struct {
-	active bool
-	reg    *regexp.Regexp
-}
-
-// Implementation of the flag.Value interface
-func (r *regexpFlag) String() string {
-	if r.reg != nil {
-		return r.reg.String()
-	}
-	return ""
-}
-
-// Implementation of the flag.Value interface
-func (r *regexpFlag) Set(s string) error {
-	r.active = true
-	r.reg = regexp.MustCompile(s)
-	return nil
+type configFile struct {
+	NoSlices          bool     `yaml:"no-slices"`
+	NoRelativeImports bool     `yaml:"no-relative-imports"`
+	NoTheseSlices     []string `yaml:"no-these-slices"`
+	NoFor             bool     `yaml:"no-for"`
+	NoLit             string   `yaml:"no-lit"`
+	AllowCasting      bool     `yaml:"allow-cast" default:true`
+	AllowBuiltins     bool     `yaml:"allow-builtins"`
+	AllowedFunctions  []string `yaml:"allowed-functions"`
 }
 
 var (
-	allowedFun = make(map[string]map[string]bool)
-	allowedRep = make(map[string]int)
-	// Flags
-	noArrays          bool
-	noSlices          bool
-	noRelativeImports bool
-	noTheseSlices     strBoolMap
-	casting           bool
-	noFor             bool
-	noLit             regexpFlag
-	allowBuiltin      bool
+	config configFile
+
+	// These value are computed from config variable values
+	noLitRegexp *regexp.Regexp
+	allowedFun  = make(map[string]map[string]bool)
+	allowedRep  = make(map[string]int)
 )
 
 type illegal struct {
@@ -83,64 +47,61 @@ func (i *illegal) String() string {
 	return i.T + " " + i.Name + " " + i.Pos
 }
 
-func init() {
-	flag.Var(&noTheseSlices, "no-these-slices", "Disallowes the slice types passed in the flag as a comma-separated list without spaces\nLike so: -no-these-slices=int,string,bool")
-	flag.Var(&noLit, "no-lit",
-		`The use of basic literals (strings or characters) matching the pattern -no-lit="{PATTERN}"
-passed to the program would not be allowed`,
-	)
-	flag.BoolVar(&noRelativeImports, "no-relative-imports", false, `Disallowes the use of relative imports`)
-	flag.BoolVar(&noFor, "no-for", false, `The "for" instruction is not allowed`)
-	flag.BoolVar(&casting, "cast", false, "Allowes casting")
-	flag.BoolVar(&noArrays, "no-array", false, "Deprecated: use -no-slices")
-	flag.BoolVar(&noSlices, "no-slices", false, "Disallowes all slice types")
-	flag.BoolVar(&allowBuiltin, "allow-builtin", false, "Allowes all builtin functions and casting")
-	sort.Sort(sort.StringSlice(os.Args[1:]))
-}
-
 func main() {
+	var configFilename string
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "Usage of rc: \nrc [OPTIONS] ARGUMENT")
+		flag.PrintDefaults()
+	}
+
+	flag.StringVar(&configFilename, "config", "config.yml", "path to yaml configuration file")
 	flag.Parse()
-	filename := goFile(flag.Args())
 
-	if _, err := os.Stat(filename); err != nil {
-		fmt.Printf("\t%s\n", err)
-		os.Exit(1)
-	}
-
-	err := parseArgs(flag.Args())
-
+	rawConf, err := os.ReadFile(configFilename)
 	if err != nil {
-		fmt.Printf("\t%s\n", err)
+		fmt.Println("Failed to read configuration file:", err)
 		os.Exit(1)
 	}
 
-	load := make(loadedSource)
+	if err = yaml.Unmarshal(rawConf, &config); err != nil {
+		fmt.Println("Failed to parse configuration file:", err)
+		os.Exit(1)
+	}
 
+	restrictLiterals()
+	allowBuiltins()
+	allowCasting()
+	allowFunctions()
+
+	args := flag.Args()
+	if len(args) > 1 {
+		fmt.Println("Too many arguments")
+		flag.Usage()
+		os.Exit(1)
+	} else if len(args) == 0 {
+		fmt.Println("This program needs at least one argument")
+		flag.Usage()
+		os.Exit(1)
+	}
+	filename := args[0]
+	load := make(loadedSource)
 	currentPath := filepath.Dir(filename)
 
 	err = loadProgram(currentPath, load)
-
 	if err != nil {
-		fmt.Printf("\t%s\n", err)
+		fmt.Println("Failed to parse file:", err)
 		os.Exit(1)
 	}
 
 	info := analyzeProgram(filename, currentPath, load)
-
-	if info.illegals != nil {
-		fmt.Println("Cheating:")
+	if len(info.illegals) > 0 {
+		fmt.Println(filename, "cheating:")
 		printIllegals(info.illegals)
-		os.Exit(1)
-	}
-}
 
-func goFile(args []string) string {
-	for _, v := range args {
-		if strings.HasSuffix(v, ".go") {
-			return v
-		}
+		// Return 127 instead of 1 to notify the submitted code doesn't respect restritions
+		os.Exit(127)
 	}
-	return ""
+	fmt.Println(filename, "OK!")
 }
 
 // Returns the smallest block containing the position pos. It can
@@ -304,6 +265,7 @@ func loadProgram(path string, load loadedSource) error {
 		l.files = pkg.Files
 	}
 
+	//TODO: relative imports should be forbidden altogether
 	for _, relativePath := range l.relImports {
 		if load[relativePath.name] == nil {
 			newPath := filepath.Clean(path + "/" + relativePath.name)
@@ -421,8 +383,7 @@ func (info *info) add(v *visitor) {
 	}
 }
 
-// Returns the info structure with all the ocurrences of the element
-// of the analised in the project
+// Returns the info structure with all the ocurrences of the element analised
 // TODO: Refactor so this function has only one responsibility
 func isAllowed(function *element, path string, load loadedSource, walked map[ast.Node]bool, info *info) bool {
 	functionObj := lookupDefinitionObj(function, path, load)
@@ -445,7 +406,7 @@ func isAllowed(function *element, path string, load loadedSource, walked map[ast
 	}
 
 	appendIllegalCall := func(function *element) {
-		info.illegals = append(info.illegals, &illegal{
+		info.illegals = append(info.illegals, illegal{
 			T:    "illegal-call",
 			Name: function.name,
 			Pos:  load[path].fset.Position(function.pos).String(),
@@ -479,7 +440,7 @@ func isAllowed(function *element, path string, load loadedSource, walked map[ast
 		isRelativeImport := load[path].relImports[pck] != nil
 		for _, fun := range funcNames {
 			appendIllegalAccess := func() {
-				info.illegals = append(info.illegals, &illegal{
+				info.illegals = append(info.illegals, illegal{
 					T:    "illegal-access",
 					Name: pck + "." + fun.name,
 					Pos:  load[path].fset.Position(fun.pos).String(),
@@ -502,7 +463,7 @@ func isAllowed(function *element, path string, load loadedSource, walked map[ast
 	}
 
 	if !allowed {
-		info.illegals = append(info.illegals, &illegal{
+		info.illegals = append(info.illegals, illegal{
 			T:    "illegal-definition",
 			Name: functionObj.Name,
 			Pos:  load[path].fset.Position(functionDefinition.Pos()).String(),
@@ -511,7 +472,7 @@ func isAllowed(function *element, path string, load loadedSource, walked map[ast
 	return allowed
 }
 
-func removeRepetitions(slc []*illegal) (result []*illegal) {
+func removeRepetitions(slc []illegal) (result []illegal) {
 	in := make(map[string]bool)
 	for _, v := range slc {
 		if in[v.Pos] {
@@ -533,7 +494,7 @@ type info struct {
 	lits           []*occurrence
 	fors           []*occurrence
 	callRepetition map[string]int
-	illegals       []*illegal // functions, selections that are not allowed
+	illegals       []illegal // functions, selections that are not allowed
 }
 
 func newElement(name string) *element {
@@ -553,7 +514,7 @@ func analyzeProgram(filename, path string, load loadedSource) *info {
 		callRepetition: make(map[string]int),
 	}
 
-	info.illegals = append(info.illegals, analyzeImports(file, fset, noRelativeImports)...)
+	info.illegals = append(info.illegals, analyzeImports(file, fset)...)
 
 	walked := make(map[ast.Node]bool)
 
@@ -562,19 +523,17 @@ func analyzeProgram(filename, path string, load loadedSource) *info {
 		isAllowed(function, path, load, walked, info)
 	}
 
-	info.illegals = append(info.illegals, analyzeLoops(info.fors, noFor)...)
-	info.illegals = append(info.illegals, analyzeArrayTypes(info.arrays, noArrays || noSlices, noTheseSlices)...)
-	info.illegals = append(info.illegals, analyzeLits(info.lits, noLit)...)
+	info.illegals = append(info.illegals, analyzeLoops(info.fors)...)
+	info.illegals = append(info.illegals, analyzeArrayTypes(info.arrays)...)
+	info.illegals = append(info.illegals, analyzeLits(info.lits)...)
 	info.illegals = append(info.illegals, analyzeRepetition(info.callRepetition, allowedRep)...)
 	info.illegals = removeRepetitions(info.illegals)
 	return info
 }
 
-func parseArgs(toAllow []string) error {
-	allowBuiltins()
-	allowCasting()
-	for _, v := range toAllow {
-		err := allowFunction(v)
+func allowFunctions() error {
+	for _, v := range config.AllowedFunctions {
+		err := allowFunc(v)
 		if err != nil {
 			return err
 		}
@@ -582,7 +541,7 @@ func parseArgs(toAllow []string) error {
 	return nil
 }
 
-func allowFunction(functionPath string) error {
+func allowFunc(functionPath string) error {
 	functionName := functionName(functionPath)
 	packageName := packageName(functionPath)
 	// for github.com/01-edu/z01 shortName = z01
@@ -628,11 +587,23 @@ func repetitionsAllowed(functionPath string) (int, error) {
 	return allowedReps, nil
 }
 
+func restrictLiterals() {
+	if len(config.NoLit) > 0 {
+		var err error
+		noLitRegexp, err = regexp.Compile(config.NoLit)
+		if err != nil {
+			fmt.Println("\tInvalid regexp for 'no-lit':", err)
+			os.Exit(1)
+		}
+	}
+
+}
+
 func allowBuiltins() {
 	if allowedFun["builtin"] == nil {
 		allowedFun["builtin"] = make(map[string]bool)
 	}
-	if allowBuiltin {
+	if config.AllowBuiltins {
 		allowedFun["builtin"]["*"] = true
 	}
 }
@@ -649,14 +620,14 @@ func allowCasting() {
 		"uintptr",
 	}
 
-	if casting {
+	if config.AllowCasting {
 		for _, v := range predeclaredTypes {
 			allowedFun["builtin"][v] = true
 		}
 	}
 }
 
-func printIllegals(illegals []*illegal) {
+func printIllegals(illegals []illegal) {
 	tbl, err := table.NewTable([]table.Column{
 		{Header: "\tTYPE:"},
 		{Header: "NAME:", MinWidth: 7},
@@ -672,11 +643,11 @@ func printIllegals(illegals []*illegal) {
 	tbl.Print()
 }
 
-func analyzeRepetition(callRepetition map[string]int, allowRep map[string]int) (illegals []*illegal) {
+func analyzeRepetition(callRepetition map[string]int, allowRep map[string]int) (illegals []illegal) {
 	for name, rep := range allowedRep {
 		if callRepetition[name] > rep {
 			diff := callRepetition[name] - rep
-			illegals = append(illegals, &illegal{
+			illegals = append(illegals, illegal{
 				T:    "illegal-amount",
 				Name: name + " exeding max repetitions by " + strconv.Itoa(diff),
 				Pos:  "all the project",
@@ -686,11 +657,11 @@ func analyzeRepetition(callRepetition map[string]int, allowRep map[string]int) (
 	return illegals
 }
 
-func analyzeLits(litOccu []*occurrence, noLit regexpFlag) (illegals []*illegal) {
-	if noLit.active {
+func analyzeLits(litOccu []*occurrence) (illegals []illegal) {
+	if len(config.NoLit) > 0 {
 		for _, v := range litOccu {
-			if noLit.reg.Match([]byte(v.name)) {
-				illegals = append(illegals, &illegal{
+			if noLitRegexp.Match([]byte(v.name)) {
+				illegals = append(illegals, illegal{
 					T:    "illegal-lit",
 					Name: v.name,
 					Pos:  v.pos,
@@ -701,10 +672,10 @@ func analyzeLits(litOccu []*occurrence, noLit regexpFlag) (illegals []*illegal) 
 	return illegals
 }
 
-func analyzeArrayTypes(arrays []*occurrence, noArrays bool, noTheseSlices map[string]bool) (illegals []*illegal) {
+func analyzeArrayTypes(arrays []*occurrence) (illegals []illegal) {
 	for _, v := range arrays {
-		if noArrays || noTheseSlices[v.name] {
-			illegals = append(illegals, &illegal{
+		if config.NoSlices || slices.Contains(config.NoTheseSlices, v.name) {
+			illegals = append(illegals, illegal{
 				T:    "illegal-slice",
 				Name: v.name,
 				Pos:  v.pos,
@@ -714,10 +685,10 @@ func analyzeArrayTypes(arrays []*occurrence, noArrays bool, noTheseSlices map[st
 	return illegals
 }
 
-func analyzeLoops(fors []*occurrence, noFor bool) (illegals []*illegal) {
-	if noFor {
+func analyzeLoops(fors []*occurrence) (illegals []illegal) {
+	if config.NoFor {
 		for _, v := range fors {
-			illegals = append(illegals, &illegal{
+			illegals = append(illegals, illegal{
 				T:    "illegal-loop",
 				Name: v.name,
 				Pos:  v.pos,
@@ -750,15 +721,15 @@ func (i *importVisitor) Visit(n ast.Node) ast.Visitor {
 	return i
 }
 
-func analyzeImports(file ast.Node, fset *token.FileSet, noRelImp bool) (illegals []*illegal) {
+func analyzeImports(file ast.Node, fset *token.FileSet) (illegals []illegal) {
 	i := &importVisitor{
 		imports: make(map[string]*element),
 	}
 	ast.Walk(i, file)
 	for _, path := range i.imports {
 		isRelativeImport := isRelativeImport(path.name)
-		if (noRelativeImports && isRelativeImport) || (allowedFun[path.name] == nil && !isRelativeImport) {
-			illegals = append(illegals, &illegal{
+		if (config.NoRelativeImports && isRelativeImport) || (allowedFun[path.name] == nil && !isRelativeImport) {
+			illegals = append(illegals, illegal{
 				T:    "illegal-import",
 				Name: path.name,
 				Pos:  fset.Position(path.pos).String(),

@@ -104,7 +104,7 @@ You can used also use the other format for arrays in yaml:
 - Disallow litterals containing any digit (in strings AND numeric types):
 
   ```yaml
-  no-lit=[0-9]
+  no-lit: "[0-9]" # Better use quotes here to avoid yaml interpreting special characters
   ```
 
 - Allow all type of casting:
@@ -116,13 +116,14 @@ You can used also use the other format for arrays in yaml:
 - Disallow the use of the slices of type `string` and `int`
 
   ```yaml
-  no-these-slices:[string,int]
-  ```
+  no-these-slices: [string, int] #
+	```
 
 - To allow casting to`rune` type only, add the type to the `allowed-functions` parameter:
 
   ```yaml
-  allowed-functions: [rune]
+  allowed-functions:
+    - rune
   ```
 
 ### How to read the error message
@@ -142,6 +143,13 @@ func main() {
 }
 ```
 
+And the following config.yml file:
+
+```yaml
+allowed-functions: 
+  - github.com/01-edu/z01.PrintRune
+```
+
 Now let us run the `rc` and understand the message
 
 ```console
@@ -159,7 +167,7 @@ Cheating:
 The important part is printed after the `Cheating` tag:
 
 - The import of of the package `fmt` is not allowed
-- In go the dot (.) is also known as the access operator for that reason the use of fmt.Println is shown as an illegal-access
+- In go the dot (.) is also known as the access operator for that reason the use of fmt.Println is shown as an illegal-access# Better use quotes here to avoid yaml interpreting special characters# Better use quotes here to avoid yaml interpreting special characters
 - Finally the main function is shown as illegal-definition because the function is using disallowed functions that does not mean that the function can not be defined it just mean that the definition of the function must be changed to not use disallowed functions.
 - Notice that the third column of the output with the tag "LOCATION:" show the location in the following way filepath:line:column
   This mean that you have to substitute the illegal function for ones that are allowed or write your own function with allowed functions

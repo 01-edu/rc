@@ -145,7 +145,7 @@ func main() {
 Now let us run the `rc` and understand the message
 
 ```console
-_$ rc main.go github.com/01-edu/z01.PrintRune
+_$ rc main.go 
 Parsing:
 	Ok
 Cheating:

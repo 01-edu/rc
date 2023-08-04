@@ -19,7 +19,7 @@ Just invoke the command by using: `rc [OPTIONS] FILE_TO_CHECK`.
 The following options can be used:
 
 - `-h` prints usage.
-- `-config` the path to a YAML configuration file. By default it will look for a `config.yml` in the directory you invoke the command from.
+- `-config FILE` the path to a YAML configuration file. By default it will look for a `config.yml` in the directory you invoke the command from.
 
 ### By default:
 
@@ -65,7 +65,8 @@ One or more of the following keys will be parsed from configuration and update t
 ### Examples:
 
 To allow the import of the whole `fmt` package, `z01.PrintRune` and the built-in functions `len` for the file `main.go`
-  Note: The imports must be written exactly the way they are written inside the source code, example:
+
+Note: The imports must be written exactly the way they are written inside the source code, example:
 
   ```yaml
   allowed-functions: [fmt.*, github.com/01-edu/z01.PrintRune, len]
@@ -116,8 +117,8 @@ You can used also use the other format for arrays in yaml:
 - Disallow the use of the slices of type `string` and `int`
 
   ```yaml
-  no-these-slices: [string, int] #
-	```
+  no-these-slices: [string, int]
+  ```
 
 - To allow casting to`rune` type only, add the type to the `allowed-functions` parameter:
 
@@ -153,7 +154,7 @@ allowed-functions:
 Now let us run the `rc` and understand the message
 
 ```console
-_$ rc main.go 
+$> rc main.go 
 Parsing:
 	Ok
 Cheating:
@@ -171,3 +172,5 @@ The important part is printed after the `Cheating` tag:
 - Finally the main function is shown as illegal-definition because the function is using disallowed functions that does not mean that the function can not be defined it just mean that the definition of the function must be changed to not use disallowed functions.
 - Notice that the third column of the output with the tag "LOCATION:" show the location in the following way filepath:line:column
   This mean that you have to substitute the illegal function for ones that are allowed or write your own function with allowed functions
+
+When `cheating` occurs, the exit code will be `127`, when the submitted code respect the restrictions, exit code will be `0`, and `1` will be returned in case an error occurs (no config file, invalid yaml, bad regex etc)

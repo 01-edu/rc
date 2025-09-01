@@ -422,12 +422,27 @@ func (info *info) add(v *visitor) {
 }
 
 // Returns the info structure with all the ocurrences of the element
-// of the analised in the project
+// of the analyzed in the project
 // TODO: Refactor so this function has only one responsibility
 func isAllowed(function *element, path string, load loadedSource, walked map[ast.Node]bool, info *info) bool {
 	functionObj := lookupDefinitionObj(function, path, load)
 	definedLocally := functionObj != nil
 	explicitlyAllowed := allowedFun["builtin"]["*"] || allowedFun["builtin"][function.name]
+
+	// Ban os.Exit(0)
+	if function.name == "Exit" {
+		if absImport, ok := load[path].absImports["os"]; ok {
+			// make sure it’s actually os.Exit
+			if absImport != nil {
+				info.illegals = append(info.illegals, &illegal{
+					T:    "banned-call",
+					Name: "os.Exit",
+					Pos:  load[path].fset.Position(function.pos).String(),
+				})
+				return false
+			}
+		}
+	}
 
 	isFunctionParameter := func(function *ast.Object) bool {
 		arg, ok := function.Data.(data)

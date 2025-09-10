@@ -71,6 +71,7 @@ var (
 	noFor             bool
 	noLit             regexpFlag
 	allowBuiltin      bool
+	allowExit         bool
 )
 
 type illegal struct {
@@ -95,6 +96,7 @@ passed to the program would not be allowed`,
 	flag.BoolVar(&noArrays, "no-array", false, "Deprecated: use -no-slices")
 	flag.BoolVar(&noSlices, "no-slices", false, "Disallowes all slice types")
 	flag.BoolVar(&allowBuiltin, "allow-builtin", false, "Allowes all builtin functions and casting")
+	flag.BoolVar(&allowExit, "allow-exit", false, "Allow os.Exit calls (by default they are forbidden)")
 	sort.Sort(sort.StringSlice(os.Args[1:]))
 }
 
@@ -182,7 +184,7 @@ func createChildScope(
 	block *ast.BlockStmt,
 	l *loadVisitor, scopes map[*ast.BlockStmt]*ast.Scope) {
 	blocks := l.blocks
-	// The smalles block containing the beggining of the block
+	// The smallest block containing the beginning of the block
 	parentBlock := smallestBlock(block.Pos(), blocks)
 	if scopes[parentBlock] == nil {
 		createChildScope(parentBlock, l, scopes)
@@ -421,28 +423,13 @@ func (info *info) add(v *visitor) {
 	}
 }
 
-// Returns the info structure with all the ocurrences of the element
+// Returns the info structure with all the occurrences of the element
 // of the analyzed in the project
 // TODO: Refactor so this function has only one responsibility
 func isAllowed(function *element, path string, load loadedSource, walked map[ast.Node]bool, info *info) bool {
 	functionObj := lookupDefinitionObj(function, path, load)
 	definedLocally := functionObj != nil
 	explicitlyAllowed := allowedFun["builtin"]["*"] || allowedFun["builtin"][function.name]
-
-	// Ban os.Exit(0)
-	if function.name == "Exit" {
-		if absImport, ok := load[path].absImports["os"]; ok {
-			// make sure it’s actually os.Exit
-			if absImport != nil {
-				info.illegals = append(info.illegals, &illegal{
-					T:    "banned-call",
-					Name: "os.Exit",
-					Pos:  load[path].fset.Position(function.pos).String(),
-				})
-				return false
-			}
-		}
-	}
 
 	isFunctionParameter := func(function *ast.Object) bool {
 		arg, ok := function.Data.(data)
@@ -559,6 +546,70 @@ func newElement(name string) *element {
 
 }
 
+func analyzeExitCalls(filename string, load loadedSource) (illegals []*illegal) {
+	file := load[filepath.Dir(filename)].files[filename]
+	fset := load[filepath.Dir(filename)].fset
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		xid, ok := sel.X.(*ast.Ident)
+		if !ok {
+			return true
+		}
+
+		abs := load[filepath.Dir(filename)].absImports[xid.Name]
+		if abs == nil || abs.name != "os" {
+			return true
+		}
+
+		if sel.Sel.Name != "Exit" {
+			return true
+		}
+
+		if len(call.Args) != 1 {
+			return true
+		}
+
+		arg := call.Args[0]
+		// Check if it is an integer literal
+		if b, ok := arg.(*ast.BasicLit); ok && b.Kind == token.INT {
+			val, err := strconv.Atoi(b.Value)
+			if err == nil {
+				if val == 0 {
+					pos := fset.Position(sel.Sel.Pos()).String()
+					illegals = append(illegals, &illegal{
+						T:    "banned-call",
+						Name: "os.Exit(0)",
+						Pos:  pos,
+					})
+				} else if val == 1 {
+					// Allowed os.Exit(1)
+					return true
+				} else {
+					// Other values are allowed
+					return true
+				}
+			}
+		} else {
+			// Non-literal args
+			pos := fset.Position(sel.Sel.Pos()).String()
+			illegals = append(illegals, &illegal{
+				T:    "banned-call",
+				Name: "os.Exit(zero_value)",
+				Pos:  pos,
+			})
+		}
+		return true
+	})
+	return illegals
+}
+
 func analyzeProgram(filename, path string, load loadedSource) *info {
 	fset := load[path].fset
 	file := load[path].files[filename]
@@ -582,6 +633,9 @@ func analyzeProgram(filename, path string, load loadedSource) *info {
 	info.illegals = append(info.illegals, analyzeLits(info.lits, noLit)...)
 	info.illegals = append(info.illegals, analyzeRepetition(info.callRepetition, allowedRep)...)
 	info.illegals = removeRepetitions(info.illegals)
+	if !allowExit {
+		info.illegals = append(info.illegals, analyzeExitCalls(filename, load)...)
+	}
 	return info
 }
 
@@ -693,7 +747,7 @@ func analyzeRepetition(callRepetition map[string]int, allowRep map[string]int) (
 			diff := callRepetition[name] - rep
 			illegals = append(illegals, &illegal{
 				T:    "illegal-amount",
-				Name: name + " exeding max repetitions by " + strconv.Itoa(diff),
+				Name: name + " exceeding max repetitions by " + strconv.Itoa(diff),
 				Pos:  "all the project",
 			})
 		}

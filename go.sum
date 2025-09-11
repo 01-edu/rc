@@ -1,5 +1,6 @@
 github.com/01-edu/z01 v0.1.0 h1:Rr1p92CKYXUgVFw872iGDABXpdkuKf2jmS+KV6r1034=
 github.com/01-edu/z01 v0.1.0/go.mod h1:BH7t35JaNFuP83rTJDc5nkSfgmC/HYVcJsUcdFqYZNo=
+github.com/01-edu/z01 v0.2.0/go.mod h1:BH7t35JaNFuP83rTJDc5nkSfgmC/HYVcJsUcdFqYZNo=
 github.com/mattn/go-runewidth v0.0.12 h1:Y41i/hVW3Pgwr8gV+J23B9YEY0zxjptBuCWEaxmAOow=
 github.com/mattn/go-runewidth v0.0.12/go.mod h1:RAqKPSqVFrSLVXbA8x7dzmKdmGzieGRCM46jaSJTDAk=
 github.com/rivo/uniseg v0.1.0 h1:+2KBaVoUmb9XzDsrx/Ct0W/EYOSFf/nWTauy++DprtY=

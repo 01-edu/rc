@@ -3,7 +3,7 @@ package util
 import (
 	"fmt"
 
-	util2 "../utilDepth2"
+	util2 "github.com/01-edu/rc/tests/utilDepth2"
 )
 
 func LenWrapperU(ss []string) int {

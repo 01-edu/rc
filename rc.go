@@ -85,17 +85,17 @@ func (i *illegal) String() string {
 }
 
 func init() {
-	flag.Var(&noTheseSlices, "no-these-slices", "Disallowes the slice types passed in the flag as a comma-separated list without spaces\nLike so: -no-these-slices=int,string,bool")
+	flag.Var(&noTheseSlices, "no-these-slices", "Disallows the slice types passed in the flag as a comma-separated list without spaces\nLike so: -no-these-slices=int,string,bool")
 	flag.Var(&noLit, "no-lit",
 		`The use of basic literals (strings or characters) matching the pattern -no-lit="{PATTERN}"
 passed to the program would not be allowed`,
 	)
-	flag.BoolVar(&noRelativeImports, "no-relative-imports", false, `Disallowes the use of relative imports`)
+	flag.BoolVar(&noRelativeImports, "no-relative-imports", false, `Disallows the use of relative imports`)
 	flag.BoolVar(&noFor, "no-for", false, `The "for" instruction is not allowed`)
-	flag.BoolVar(&casting, "cast", false, "Allowes casting")
+	flag.BoolVar(&casting, "cast", false, "Allows casting")
 	flag.BoolVar(&noArrays, "no-array", false, "Deprecated: use -no-slices")
-	flag.BoolVar(&noSlices, "no-slices", false, "Disallowes all slice types")
-	flag.BoolVar(&allowBuiltin, "allow-builtin", false, "Allowes all builtin functions and casting")
+	flag.BoolVar(&noSlices, "no-slices", false, "Disallows all slice types")
+	flag.BoolVar(&allowBuiltin, "allow-builtin", false, "Allows all builtin functions and casting")
 	flag.BoolVar(&allowExit, "allow-exit", false, "Allow os.Exit calls (by default they are forbidden)")
 	sort.Sort(sort.StringSlice(os.Args[1:]))
 }
